@@ -1,4 +1,4 @@
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 
 const USER_FILE = FileSystem.documentDirectory + "lullaby_user.json";
 const SLEEP_STOP_FILE = FileSystem.documentDirectory + "lullaby_sleep_stop.json";
