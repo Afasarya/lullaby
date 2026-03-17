@@ -15,6 +15,11 @@ import { useRouter } from "expo-router";
 import * as NavigationBar from "expo-navigation-bar";
 import { BlurView } from "expo-blur";
 import AppLocker from "../modules/AppLocker";
+import {
+  canStopSleepMode,
+  getSleepStopRemaining,
+  recordSleepStop,
+} from "../utils/userStore";
 
 const formatTime = (date: Date): string => {
   const h = date.getHours().toString().padStart(2, "0");
@@ -37,11 +42,13 @@ export default function LockerSleep() {
   const [sleepEnd, setSleepEnd] = useState(timeToDate("06:00"));
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
+  const [stopRemaining, setStopRemaining] = useState(2);
 
   useEffect(() => {
     NavigationBar.setBehaviorAsync("overlay-swipe");
     NavigationBar.setVisibilityAsync("hidden");
     AppLocker.isServiceRunning().then(setIsActive);
+    getSleepStopRemaining().then(setStopRemaining);
   }, []);
 
   // Quick Test: set window = now → now+2 minutes
@@ -75,17 +82,35 @@ export default function LockerSleep() {
         setLoading(false);
       }
     } else {
-      Alert.alert("Stop Sleep Mode", "Are you sure?", [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Stop",
-          style: "destructive",
-          onPress: async () => {
-            await AppLocker.stopLockService();
-            setIsActive(false);
+      // Cek sisa jatah stop minggu ini
+      const allowed = await canStopSleepMode();
+      if (!allowed) {
+        Alert.alert(
+          "🚫 Weekly Limit Reached",
+          "You can only stop Sleep Mode 2 times per week.\n\nLimit resets every Monday. Stay committed! 💪"
+        );
+        return;
+      }
+
+      const remaining = await getSleepStopRemaining();
+      Alert.alert(
+        "Stop Sleep Mode",
+        `Are you sure?\n\nStop attempts remaining this week: ${remaining}/2`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Stop",
+            style: "destructive",
+            onPress: async () => {
+              await AppLocker.stopLockService();
+              await recordSleepStop();
+              const newRemaining = await getSleepStopRemaining();
+              setStopRemaining(newRemaining);
+              setIsActive(false);
+            },
           },
-        },
-      ]);
+        ]
+      );
     }
   };
 
@@ -162,19 +187,37 @@ export default function LockerSleep() {
             </Text>
           </View>
 
+          {/* Stop limit badge */}
+          {isActive && (
+            <View style={[
+              styles.stopLimitBadge,
+              stopRemaining === 0 && styles.stopLimitBadgeEmpty,
+            ]}>
+              <Text style={styles.stopLimitText}>
+                {stopRemaining === 0
+                  ? "🚫 Stop limit reached — resets next Monday"
+                  : `⚠️ Stop attempts left this week: ${stopRemaining}/2`}
+              </Text>
+            </View>
+          )}
+
           {/* Toggle */}
           <BlurView intensity={20} tint="dark" style={styles.toggleCard}>
             <View style={styles.toggleRow}>
               <View>
                 <Text style={styles.toggleLabel}>Sleep Mode</Text>
                 <Text style={styles.toggleSubLabel}>
-                  {isActive ? "Active – phone locked during sleep hours" : "Tap to activate"}
+                  {isActive
+                    ? stopRemaining === 0
+                      ? "Active – stop limit reached this week"
+                      : "Active – phone locked during sleep hours"
+                    : "Tap to activate"}
                 </Text>
               </View>
               <Switch
                 value={isActive}
                 onValueChange={handleToggle}
-                disabled={loading}
+                disabled={loading || (isActive && stopRemaining === 0)}
                 trackColor={{ false: "#555", true: "#C9A4E7" }}
                 thumbColor={isActive ? "#fff" : "#aaa"}
               />
@@ -369,6 +412,29 @@ const styles = StyleSheet.create({
     color: "#FFD54F",
     fontSize: 14,
     fontWeight: "600",
+  },
+
+  stopLimitBadge: {
+    backgroundColor: "rgba(255,213,79,0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(255,213,79,0.4)",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    alignItems: "center",
+  },
+
+  stopLimitBadgeEmpty: {
+    backgroundColor: "rgba(200,50,50,0.15)",
+    borderColor: "rgba(200,50,50,0.4)",
+  },
+
+  stopLimitText: {
+    color: "#FFD54F",
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
   },
 
   tipCard: {
