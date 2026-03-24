@@ -170,14 +170,12 @@ export default function Locker() {
                   </Text>
                 </TouchableOpacity>
               )}
-              {(permissions.usageStats || permissions.overlay) && (
-                <TouchableOpacity
-                  style={[styles.permissionButton, { backgroundColor: "#3F1F5A" }]}
-                  onPress={checkPermissions}
-                >
-                  <Text style={styles.permissionButtonText}>🔄 Check Again</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                style={[styles.permissionButton, { backgroundColor: "#3F1F5A" }]}
+                onPress={checkPermissions}
+              >
+                <Text style={styles.permissionButtonText}>🔄 Sudah Kasih Izin? Cek Ulang</Text>
+              </TouchableOpacity>
             </View>
           )}
 

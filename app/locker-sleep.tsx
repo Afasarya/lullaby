@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -9,17 +9,14 @@ import {
   Switch,
   Alert,
   Platform,
+  Linking,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import * as NavigationBar from "expo-navigation-bar";
 import { BlurView } from "expo-blur";
 import AppLocker from "../modules/AppLocker";
-import {
-  canStopSleepMode,
-  getSleepStopRemaining,
-  recordSleepStop,
-} from "../utils/userStore";
 
 const formatTime = (date: Date): string => {
   const h = date.getHours().toString().padStart(2, "0");
@@ -42,14 +39,34 @@ export default function LockerSleep() {
   const [sleepEnd, setSleepEnd] = useState(timeToDate("06:00"));
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
-  const [stopRemaining, setStopRemaining] = useState(2);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const syncServiceStatus = useCallback(async () => {
+    const running = await AppLocker.isServiceRunning();
+    setIsActive(running);
+  }, []);
 
   useEffect(() => {
     NavigationBar.setBehaviorAsync("overlay-swipe");
     NavigationBar.setVisibilityAsync("hidden");
-    AppLocker.isServiceRunning().then(setIsActive);
-    getSleepStopRemaining().then(setStopRemaining);
   }, []);
+
+  // Re-cek saat screen difokuskan (balik dari background / navigasi)
+  useFocusEffect(
+    useCallback(() => {
+      syncServiceStatus();
+
+      // Polling setiap 10 detik untuk mendeteksi kalau sleep window habis
+      pollRef.current = setInterval(syncServiceStatus, 10_000);
+
+      return () => {
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      };
+    }, [syncServiceStatus])
+  );
 
   // Quick Test: set window = now → now+2 minutes
   const handleQuickTest = () => {
@@ -64,54 +81,30 @@ export default function LockerSleep() {
   };
 
   const handleToggle = async (val: boolean) => {
-    if (val) {
-      setLoading(true);
-      try {
-        await AppLocker.startLockService("sleep", {
-          sleepStart: formatTime(sleepStart),
-          sleepEnd: formatTime(sleepEnd),
-        });
-        setIsActive(true);
-        Alert.alert(
-          "Sleep Mode Active 🌙",
-          `Your phone will be locked from ${formatTime(sleepStart)} to ${formatTime(sleepEnd)}.\n\nYou can stop it anytime from the notification bar.`
-        );
-      } catch (e) {
-        Alert.alert("Error", "Failed to start sleep mode.");
-      } finally {
-        setLoading(false);
-      }
-    } else {
-      // Cek sisa jatah stop minggu ini
-      const allowed = await canStopSleepMode();
-      if (!allowed) {
-        Alert.alert(
-          "🚫 Weekly Limit Reached",
-          "You can only stop Sleep Mode 2 times per week.\n\nLimit resets every Monday. Stay committed! 💪"
-        );
-        return;
-      }
+    // Hanya bisa diaktifkan (ON), tidak bisa dimatikan dari sini
+    if (!val) return;
 
-      const remaining = await getSleepStopRemaining();
+    setLoading(true);
+    try {
+      await AppLocker.startLockService("sleep", {
+        sleepStart: formatTime(sleepStart),
+        sleepEnd: formatTime(sleepEnd),
+      });
+      setIsActive(true);
       Alert.alert(
-        "Stop Sleep Mode",
-        `Are you sure?\n\nStop attempts remaining this week: ${remaining}/2`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Stop",
-            style: "destructive",
-            onPress: async () => {
-              await AppLocker.stopLockService();
-              await recordSleepStop();
-              const newRemaining = await getSleepStopRemaining();
-              setStopRemaining(newRemaining);
-              setIsActive(false);
-            },
-          },
-        ]
+        "Sleep Mode Active 🌙",
+        `Your phone will be locked from ${formatTime(sleepStart)} to ${formatTime(sleepEnd)}.`
       );
+    } catch {
+      Alert.alert("Error", "Failed to start sleep mode.");
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const handleEmergencyCall = () => {
+    // Buka dialer kosong — user bisa ketik nomor darurat apapun (112, 119, 911, dll)
+    Linking.openURL("tel:");
   };
 
   return (
@@ -187,20 +180,6 @@ export default function LockerSleep() {
             </Text>
           </View>
 
-          {/* Stop limit badge */}
-          {isActive && (
-            <View style={[
-              styles.stopLimitBadge,
-              stopRemaining === 0 && styles.stopLimitBadgeEmpty,
-            ]}>
-              <Text style={styles.stopLimitText}>
-                {stopRemaining === 0
-                  ? "🚫 Stop limit reached — resets next Monday"
-                  : `⚠️ Stop attempts left this week: ${stopRemaining}/2`}
-              </Text>
-            </View>
-          )}
-
           {/* Toggle */}
           <BlurView intensity={20} tint="dark" style={styles.toggleCard}>
             <View style={styles.toggleRow}>
@@ -208,28 +187,39 @@ export default function LockerSleep() {
                 <Text style={styles.toggleLabel}>Sleep Mode</Text>
                 <Text style={styles.toggleSubLabel}>
                   {isActive
-                    ? stopRemaining === 0
-                      ? "Active – stop limit reached this week"
-                      : "Active – phone locked during sleep hours"
+                    ? "Active – phone locked during sleep hours"
                     : "Tap to activate"}
                 </Text>
               </View>
               <Switch
                 value={isActive}
                 onValueChange={handleToggle}
-                disabled={loading || (isActive && stopRemaining === 0)}
+                disabled={loading || isActive}
                 trackColor={{ false: "#555", true: "#C9A4E7" }}
                 thumbColor={isActive ? "#fff" : "#aaa"}
               />
             </View>
           </BlurView>
 
+          {/* Emergency Call button — selalu tampil */}
+          <TouchableOpacity
+            style={styles.emergencyBtn}
+            onPress={handleEmergencyCall}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.emergencyIcon}>🚨</Text>
+            <View style={styles.emergencyTextGroup}>
+              <Text style={styles.emergencyTitle}>Emergency Call</Text>
+              <Text style={styles.emergencySubtitle}>Buka dialer – ketik nomor darurat sendiri</Text>
+            </View>
+          </TouchableOpacity>
+
           {/* Testing note */}
           <View style={styles.tipCard}>
             <Text style={styles.tipTitle}>💡 Testing Tip</Text>
             <Text style={styles.tipText}>
-              For a quick 2-min test: set bedtime to 1 minute from now, and wake-up time 3 minutes from now.
-              Open another app (e.g. Calculator) – the lock screen should appear automatically.
+              For a quick 2-min test: tap ⚡ Quick Test, then toggle ON.
+              Open another app – the lock screen will appear automatically.
             </Text>
           </View>
 
@@ -321,7 +311,6 @@ const styles = StyleSheet.create({
   },
 
   timeEmoji: { fontSize: 28 },
-
   timeTextGroup: { flex: 1 },
 
   timeLabel: {
@@ -414,27 +403,37 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  stopLimitBadge: {
-    backgroundColor: "rgba(255,213,79,0.15)",
-    borderWidth: 1,
-    borderColor: "rgba(255,213,79,0.4)",
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    marginBottom: 12,
+  emergencyBtn: {
+    flexDirection: "row",
     alignItems: "center",
+    backgroundColor: "rgba(220,38,38,0.2)",
+    borderWidth: 1.5,
+    borderColor: "rgba(220,38,38,0.6)",
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    marginBottom: 16,
+    gap: 14,
   },
 
-  stopLimitBadgeEmpty: {
-    backgroundColor: "rgba(200,50,50,0.15)",
-    borderColor: "rgba(200,50,50,0.4)",
+  emergencyIcon: {
+    fontSize: 30,
   },
 
-  stopLimitText: {
-    color: "#FFD54F",
+  emergencyTextGroup: {
+    flex: 1,
+  },
+
+  emergencyTitle: {
+    color: "#FF6B6B",
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 2,
+  },
+
+  emergencySubtitle: {
+    color: "rgba(255,255,255,0.55)",
     fontSize: 12,
-    fontWeight: "600",
-    textAlign: "center",
   },
 
   tipCard: {
