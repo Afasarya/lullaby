@@ -211,8 +211,8 @@ export default function Locker() {
             color="#569CD6"
           />
 
-          {/* Stop All Button */}
-          {activeMode && (
+          {/* Stop Button - hanya untuk study/work, sleep mode TIDAK bisa di-stop dari UI */}
+          {(activeMode === "study" || activeMode === "work") && (
             <TouchableOpacity
               style={styles.stopButton}
               onPress={handleStopAll}

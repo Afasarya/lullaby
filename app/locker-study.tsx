@@ -77,20 +77,7 @@ export default function LockerStudy() {
     }
   };
 
-  const handleStop = () => {
-    Alert.alert("Stop Study Mode", "Are you sure you want to stop?", [
-      { text: "Keep Going", style: "cancel" },
-      {
-        text: "Stop",
-        style: "destructive",
-        onPress: async () => {
-          await AppLocker.stopLockService();
-          stopCountdown();
-          setIsActive(false);
-        },
-      },
-    ]);
-  };
+  // Stop tidak diizinkan dari UI — hanya bisa dari notifikasi sistem
 
   const formatCountdown = (secs: number): string => {
     const m = Math.floor(secs / 60).toString().padStart(2, "0");
@@ -169,8 +156,8 @@ export default function LockerStudy() {
             </BlurView>
           )}
 
-          {/* Start / Stop Button */}
-          {!isActive ? (
+          {/* Start Button - hanya tampil saat tidak aktif */}
+          {!isActive && (
             <TouchableOpacity
               style={styles.startButton}
               onPress={handleStart}
@@ -183,10 +170,6 @@ export default function LockerStudy() {
                   ? "▶ Start Study Mode (1 min – Test)"
                   : `▶ Start Study Mode (${selectedGrace} min)`}
               </Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.stopButton} onPress={handleStop}>
-              <Text style={styles.stopButtonText}>⛔ Stop Study Mode</Text>
             </TouchableOpacity>
           )}
 
